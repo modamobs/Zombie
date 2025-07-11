@@ -8,70 +8,98 @@ public class PlayerMovement : MonoBehaviour {
     private Animator playerAnimator; // 플레이어 캐릭터의 애니메이터
     private PlayerInput playerInput; // 플레이어 입력을 알려주는 컴포넌트
     private Rigidbody playerRigidbody; // 플레이어 캐릭터의 리지드바디
+    private Camera playerCamera; // 플레이어 카메라 참조
 
     private void Start() {
         // 사용할 컴포넌트들의 참조를 가져오기
         playerInput = GetComponent<PlayerInput>();
         playerRigidbody = GetComponent<Rigidbody>();
         playerAnimator = GetComponent<Animator>();
+        
+        // 메인 카메라 참조 가져오기
+        playerCamera = Camera.main;
     }
 
     // FixedUpdate는 물리 갱신 주기에 맞춰 실행됨
-    private void FixedUpdate()
-    {
-        // 마우스 위치를 기준으로 캐릭터 회전
+    private void FixedUpdate() {
+        // 회전 실행
         Rotate();
-        // 키보드 입력을 기준으로 캐릭터 이동
+        // 움직임 실행
         Move();
 
-        // 입력값에 따라 애니메이터의 Move 파라미터 값을 변경 (2D 이동량의 크기)
+        // 입력값에 따라 애니메이터의 Move 파라미터 값을 변경 (이동 속도의 크기 사용)
         float moveAmount = new Vector2(playerInput.moveHorizontal, playerInput.moveVertical).magnitude;
         playerAnimator.SetFloat("Move", moveAmount);
     }
 
-    // 입력값에 따라 캐릭터를 앞뒤, 좌우로 움직임 (카메라 기준)
+    // 입력값에 따라 캐릭터를 상하좌우로 움직임 (카메라 방향 기준)
     private void Move() {
-        // 카메라 기준 방향 구하기 (y=0으로 평면화)
-        Vector3 camForward = Camera.main.transform.forward;
-        camForward.y = 0f;
-        camForward.Normalize();
-        Vector3 camRight = Camera.main.transform.right;
-        camRight.y = 0f;
-        camRight.Normalize();
-        // 카메라 기준 이동 방향 계산 (WASD/방향키 입력)
-        Vector3 moveDirection =
-            playerInput.moveVertical * camForward +
-            playerInput.moveHorizontal * camRight;
-        if (moveDirection.sqrMagnitude > 0.001f) {
-            // 입력이 있을 때만 이동 (정규화된 방향 * 속도 * 시간)
-            Vector3 moveDistance = moveDirection.normalized * moveSpeed * Time.fixedDeltaTime;
-            // Rigidbody의 MovePosition으로 물리 이동
-            playerRigidbody.MovePosition(playerRigidbody.position + moveDistance);
-        }
-        // 항상 velocity를 0으로 설정하여 물리 간섭 방지 (즉시 멈춤)
-        playerRigidbody.linearVelocity = Vector3.zero;
-        playerRigidbody.angularVelocity = Vector3.zero;
+        // 카메라가 없으면 이동하지 않음
+        if (playerCamera == null) return;
+        
+        // 카메라의 forward와 right 벡터를 Y축 제거하여 평면상의 방향만 사용
+        Vector3 cameraForward = playerCamera.transform.forward;
+        Vector3 cameraRight = playerCamera.transform.right;
+        
+        // Y축 성분 제거 (평면 이동만)
+        cameraForward.y = 0;
+        cameraRight.y = 0;
+        
+        // 정규화
+        cameraForward.Normalize();
+        cameraRight.Normalize();
+        
+        // 카메라 방향 기준으로 이동 거리 계산
+        Vector3 moveVertical = playerInput.moveVertical * cameraForward * moveSpeed * Time.deltaTime;
+        Vector3 moveHorizontal = playerInput.moveHorizontal * cameraRight * moveSpeed * Time.deltaTime;
+        
+        // 최종 이동 거리 = 앞뒤 이동 + 좌우 이동
+        Vector3 moveDistance = moveVertical + moveHorizontal;
+        
+        // 리지드바디를 통해 게임 오브젝트 위치 변경
+        playerRigidbody.MovePosition(playerRigidbody.position + moveDistance);
     }
 
-    // 마우스 포인터 방향을 바라보도록 캐릭터 회전
+    // 마우스 위치를 기준으로 캐릭터 회전
     private void Rotate() {
-        // 마우스 포인터가 가리키는 월드 위치 구하기 (카메라 기준)
-        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-        // y=캐릭터 위치 평면(지면) 생성
-        Plane groundPlane = new Plane(Vector3.up, transform.position);
-        float rayDistance;
-        // 마우스 광선이 평면과 만나는 지점 계산
-        if (groundPlane.Raycast(ray, out rayDistance))
+        // 카메라가 없으면 회전하지 않음
+        if (playerCamera == null) return;
+        
+        // 플레이어 위치를 스크린 좌표로 변환
+        Vector3 playerScreenPosition = playerCamera.WorldToScreenPoint(transform.position);
+        
+        // 마우스 스크린 좌표 가져오기
+        Vector3 mouseScreenPosition = Input.mousePosition;
+        
+        // 스크린 좌표에서 방향 벡터 계산
+        Vector2 direction2D = new Vector2(
+            mouseScreenPosition.x - playerScreenPosition.x,
+            mouseScreenPosition.y - playerScreenPosition.y
+        );
+        
+        // 방향 벡터가 유효한 경우에만 회전
+        if (direction2D.magnitude > 0.001f)
         {
-            Vector3 mouseWorldPos = ray.GetPoint(rayDistance); // 마우스가 가리키는 월드 좌표
-            Vector3 lookDir = mouseWorldPos - transform.position; // 캐릭터에서 마우스까지 방향 벡터
-            lookDir.y = 0f; // 수평 회전만 적용
-            if (lookDir.sqrMagnitude > 0.001f)
-            {
-                // 해당 방향을 바라보도록 회전
-                Quaternion targetRotation = Quaternion.LookRotation(lookDir);
-                playerRigidbody.rotation = targetRotation;
-            }
+            // 스크린 좌표의 방향을 월드 좌표 방향으로 변환
+            Vector3 worldDirection = new Vector3(direction2D.x, 0, direction2D.y);
+            
+            // 카메라 방향 고려하여 월드 방향으로 변환
+            Vector3 cameraForward = playerCamera.transform.forward;
+            Vector3 cameraRight = playerCamera.transform.right;
+            
+            // Y축 성분 제거
+            cameraForward.y = 0;
+            cameraRight.y = 0;
+            cameraForward.Normalize();
+            cameraRight.Normalize();
+            
+            // 최종 방향 계산
+            Vector3 finalDirection = cameraRight * direction2D.x + cameraForward * direction2D.y;
+            finalDirection.y = 0;
+            
+            // 마우스 방향으로 회전
+            Quaternion targetRotation = Quaternion.LookRotation(finalDirection);
+            playerRigidbody.rotation = targetRotation;
         }
     }
 }
